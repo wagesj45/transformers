@@ -53,6 +53,9 @@ from utils_summarization import (
     compute_token_type_ids,
 )
 
+
+CPU_COUNT = len(os.sched_getaffinity(0))
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
@@ -107,6 +110,7 @@ def collate(data, tokenizer, block_size):
 # BertAbs model & optimizer
 # -------------------------
 
+
 def get_BertAbs_model():
     """ Initializes the BertAbs model for finetuning.
     """
@@ -122,9 +126,7 @@ def get_BertAbs_model():
     )
     decoder_model = BertForMaskedLM(decoder_config)
 
-    model = Model2Model.from_pretrained(
-        "bert-base-uncased", decoder_model=decoder_model
-    )
+    model = Model2Model.from_pretrained("bert-base-uncased", decoder_model=decoder_model)
 
     return tokenizer, model
 
@@ -191,9 +193,6 @@ class BertSumOptimizer(object):
 def summarize(args, source, encoder_token_type_ids, encoder_mask, model, tokenizer):
     """ Summarize a whole batch returned by the data loader.
     """
-    source = source.to(args.device)
-    encoder_token_type_ids = encoder_token_type_ids.to(args.device)
-    encoder_mask = encoder_mask.to(args.device)
 
     model_kwargs = {
         "encoder_token_type_ids": encoder_token_type_ids,
@@ -238,6 +237,7 @@ def decode_summary(summary_tokens, tokenizer):
     sentences = summary.split(".")
     sentences = [s + "." for s in sentences]
     return sentences
+
 
 # ------------
 # Train
@@ -360,11 +360,25 @@ def train(args, model, tokenizer):
                     and global_step % args.logging_steps == 0
                 ):
                     if not args.is_distributed and args.evaluate_during_training:
-                        summaries_tokens = summarize(args, source, encoder_token_type_ids, encoder_mask, model, tokenizer) 
+                        story = source[0].unsqueeze(0)
+                        story_encoder_token_type_ids = encoder_token_type_ids[0].unsqueeze(0)
+                        story_encoder_mask = encoder_mask[0].unsqueeze(0)
+                        summaries_tokens = summarize(
+                            args,
+                            story,
+                            story_encoder_token_type_ids,
+                            story_encoder_mask,
+                            model,
+                            tokenizer,
+                        )
                         sentences = decode_summary(summaries_tokens[0], tokenizer)
                         sample_summary = " ".join(sentences)
                         tb_writer.add_text("summary", sample_summary, global_step)
-                        tb_writer.add_text("article", tokenizer.decode(source.to("cpu").numpy()[0]), global_step)
+                        tb_writer.add_text(
+                            "article",
+                            tokenizer.decode(story.to("cpu").numpy()[0]),
+                            global_step,
+                        )
                     learning_rate_encoder = optimizer.current_learning_rates["encoder"]
                     learning_rate_decoder = optimizer.current_learning_rates["decoder"]
                     tb_writer.add_scalar(
@@ -393,7 +407,14 @@ def train(args, model, tokenizer):
                 epoch_iterator.close()
                 break
 
-            del source, target, encoder_token_type_ids, encoder_mask, decoder_mask, lm_labels
+            del (
+                source,
+                target,
+                encoder_token_type_ids,
+                encoder_mask,
+                decoder_mask,
+                lm_labels,
+            )
 
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
@@ -422,6 +443,7 @@ def evaluate(args, model, tokenizer, path_to_summaries):
         sampler=eval_sampler,
         batch_size=args.eval_batch_size,
         collate_fn=eval_collate_fn,
+        num_workers=CPU_COUNT - 2,
     )
 
     logger.info("***** Running evaluation *****")
@@ -432,7 +454,12 @@ def evaluate(args, model, tokenizer, path_to_summaries):
     idx_summary = 0
     for batch in tqdm(eval_dataloader, desc="Evaluating"):
         source, _, encoder_token_type_ids, encoder_mask, _, _ = batch
-        summaries_tokens = summarize(args, source, encoder_token_type_ids, encoder_mask, model, tokenizer)
+        source = source.to(args.device)
+        encoder_token_type_ids = encoder_token_type_ids.to(args.device)
+        encoder_mask = encoder_mask.to(args.device)
+        summaries_tokens = summarize(
+            args, source, encoder_token_type_ids, encoder_mask, model, tokenizer
+        )
         for summary_tokens in summaries_tokens:
             sentences = decode_summary(summary_tokens, tokenizer)
             path = os.path.join(path_to_summaries, "model_{}.txt".format(idx_summary))
