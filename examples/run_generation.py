@@ -238,7 +238,7 @@ def main():
     )
 
     output_sequences = sampler.generate_sequence(
-        length=args.length, prompt=encoded_prompt, **model_kwargs
+        length=args.length, prompt_ids=encoded_prompt, **model_kwargs
     )
     generated_sequence = output_sequences[
         len(encoded_prompt) :

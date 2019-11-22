@@ -158,9 +158,9 @@ class SamplerSingleStack(Sampler):
         self.model = model
         super(SamplerSingleStack, self).__init__(config, device)
 
-    def generate_sequence(self, length=1, prompt=[], **model_kwargs):
-        prompt = torch.tensor(prompt, dtype=torch.long, device=self.device).unsqueeze(0)
-        generated_sequence = prompt
+    def generate_sequence(self, length=1, prompt_ids=[], **model_kwargs):
+        prompt_ids = torch.tensor(prompt_ids, dtype=torch.long, device=self.device).unsqueeze(0)
+        generated_sequence = prompt_ids
         with torch.no_grad():
             for _ in trange(length):
                 outputs = self.model.decode(generated_sequence, **model_kwargs)

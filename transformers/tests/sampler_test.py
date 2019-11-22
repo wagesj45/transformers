@@ -119,7 +119,7 @@ class SamplerSingleStackTest(unittest.TestCase):
             kwargs = models_kwargs[name]
             sampler = generate.new_sampler(model, k=2, p=0.5, repetition_penalty=2)
             output1 = sampler.generate_sequence(length=generated_length, **kwargs)
-            output2 = sampler.generate_sequence(prompt=prompt, length=generated_length, **kwargs)
+            output2 = sampler.generate_sequence(prompt_ids=prompt, length=generated_length, **kwargs)
             self.assertEqual(len(output1), expected_length_without_prompt)
             self.assertEqual(len(output2), expected_length_with_prompt)
 
