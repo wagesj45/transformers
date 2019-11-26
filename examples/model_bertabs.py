@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn.init import xavier_uniform_
-
+import pdb
 from transformers import BertModel, BertConfig, PreTrainedEncoderDecoder
 
 
@@ -132,7 +132,7 @@ class BertAbsSummarizer(nn.Module):
         )
         encoder_hidden_states = encoder_output[0]
         dec_state = self.decoder.init_decoder_state(encoder_input_ids, encoder_hidden_states)
-        decoder_outputs = self.decoder(decoder_input_ids[:, :-1], encoder_hidden_states, dec_state)
+        decoder_outputs, _ = self.decoder(decoder_input_ids[:, :-1], encoder_hidden_states, dec_state)
         return decoder_outputs
 
 
@@ -203,7 +203,7 @@ class TransformerDecoder(nn.Module):
     # def forward(self, input_ids, state, attention_mask=None, memory_lengths=None,
     # step=None, cache=None, encoder_attention_mask=None, encoder_hidden_states=None, memory_masks=None):
     def forward(self, input_ids, encoder_hidden_states=None, state=None, attention_mask=None, memory_lengths=None,
-                step=None, cache=None, encoder_attention_mask=None, memory_masks=None):
+                step=None, cache=None, encoder_attention_mask=None):
         """
         See :obj:`onmt.modules.RNNDecoderBase.forward()`
         memory_bank = encoder_hidden_states
@@ -227,8 +227,8 @@ class TransformerDecoder(nn.Module):
 
         # Encoder padding mask
         if memory_mask is not None:
-            src_len = memory_masks.size(-1)
-            src_pad_mask = memory_masks.expand(src_batch, tgt_len, src_len)
+            src_len = memory_mask.size(-1)
+            src_pad_mask = memory_mask.expand(src_batch, tgt_len, src_len)
         else:
             src_pad_mask = src_words.data.eq(padding_idx).unsqueeze(1) \
                 .expand(src_batch, tgt_len, src_len)
@@ -271,7 +271,7 @@ class TransformerDecoder(nn.Module):
 
         # Decoders in Transformers return a tuple. Beam search will fail
         # if we don't follow this convention.
-        return (output,)  # , state
+        return (output,), state  # , state
 
     def init_decoder_state(self, src, memory_bank,
                            with_cache=False):

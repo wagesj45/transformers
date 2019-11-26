@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import DataLoader, SequentialSampler
 from tqdm import tqdm
 
-from model_bertabs import BertAbsSummarizer
+from model_bertabs import BertAbsSummarizer, TransformerDecoderState
 from transformers.generate import BeamSearch
 from transformers import BertTokenizer
 
@@ -115,7 +115,6 @@ def evaluate(args, model, tokenizer):
     model.eval()
 
     for batch in tqdm(eval_dataloader, desc="Evaluating"):
-        print(batch)
         source, _, encoder_token_type_ids, encoder_mask, _, _ = batch
         source = source.to(args.device)
         encoder_token_type_ids = encoder_token_type_ids.to(args.device)
@@ -134,20 +133,23 @@ def summarize(args, source, encoder_token_type_ids, encoder_mask, model, tokeniz
 
     model_kwargs = {
         "encoder_token_type_ids": encoder_token_type_ids,
-        "encoder_attention_mask": encoder_mask,
+        # "encoder_attention_mask": encoder_mask,
+        "decoder_state": TransformerDecoderState(source),
     }
+
+    symbols = {'BOS': tokenizer.vocab['[unused0]'], 'EOS': tokenizer.vocab['[unused1]'], 'PAD': tokenizer.vocab['[PAD]']}
 
     batch_size = source.size(0)
     with torch.no_grad():
         beam = BeamSearch(
             model,
-            tokenizer.cls_token_id,
-            tokenizer.pad_token_id,
-            tokenizer.sep_token_id,
+            symbols['BOS'],
+            symbols['PAD'],
+            symbols['EOS'],
             batch_size=batch_size,
             beam_size=5,
-            min_length=15,
-            max_length=150,
+            min_length=5,
+            max_length=10,
             alpha=0.9,
             block_repeating_trigrams=True,
             device=device,
@@ -204,7 +206,7 @@ if __name__ == "__main__":
     args.device = torch.device("cpu")
 
     # Model & Tokenizer
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
     model = get_pretrained_BertAbs_model('bert-ext-abs.pt')
 
     # Evaluate
