@@ -1,9 +1,6 @@
 from collections import namedtuple
 import copy
 import math
-
-import pdb
-
 import numpy as np
 import torch
 from torch import nn
@@ -127,11 +124,15 @@ class BertAbsSummarizer(nn.Module):
     # def forward(self, encoder_input_ids, decoder_input_ids, **kwargs)
     # **kwargs prefixed by encoder_ or decoder_ are passed to respective
     # forward function.
-    def forward(self, encoder_input_ids, decoder_input_ids, segs, mask_src, mask_tgt):
-        top_vec = self.encoder(encoder_input_ids, segs, mask_src)
-        dec_state = self.decoder.init_decoder_state(encoder_input_ids, top_vec)
-        # decoder_outputs, state = self.decoder(decoder_input_ids[:, :-1], top_vec, dec_state)
-        decoder_outputs = self.decoder(decoder_input_ids[:, :-1], top_vec, dec_state)
+    def forward(self, encoder_input_ids, decoder_input_ids, token_type_ids, encoder_attention_mask, decoder_attention_mask):
+        encoder_output = self.encoder(
+            input_ids=encoder_input_ids,
+            token_type_ids=token_type_ids,
+            attention_mask=encoder_attention_mask
+        )
+        encoder_hidden_states = encoder_output[0]
+        dec_state = self.decoder.init_decoder_state(encoder_input_ids, encoder_hidden_states)
+        decoder_outputs = self.decoder(decoder_input_ids[:, :-1], encoder_hidden_states, dec_state)
         return decoder_outputs
 
 
@@ -157,10 +158,10 @@ class Bert(nn.Module):
 
 
 def get_generator(vocab_size, dec_hidden_size, device):
-    gen_func = nn.LogSoftmax(dim=-1)
+    #gen_func = nn.LogSoftmax(dim=-1)
     generator = nn.Sequential(
         nn.Linear(dec_hidden_size, vocab_size),
-        gen_func
+    #    gen_func
     )
     generator.to(device)
 
@@ -201,77 +202,76 @@ class TransformerDecoder(nn.Module):
     # forward(input_ids, attention_mask, encoder_hidden_states, encoder_attention_mask)
     # def forward(self, input_ids, state, attention_mask=None, memory_lengths=None,
     # step=None, cache=None, encoder_attention_mask=None, encoder_hidden_states=None, memory_masks=None):
-    def forward(self, input_ids, attention_mask=None, memory_lengths=None,
-                step=None, cache=None, encoder_attention_mask=None, encoder_hidden_states=None, memory_masks=None):
+    def forward(self, input_ids, encoder_hidden_states=None, state=None, attention_mask=None, memory_lengths=None,
+                step=None, cache=None, encoder_attention_mask=None, memory_masks=None):
         """
         See :obj:`onmt.modules.RNNDecoderBase.forward()`
+        memory_bank = encoder_hidden_states
         """
-        pdb.set_trace()
-
+        # Name conversion
         tgt = input_ids
         memory_bank = encoder_hidden_states
-        src_pad_mask = encoder_attention_mask
-        tgt_pad_mask = attention_mask
+        memory_mask = encoder_attention_mask
 
         # src_words = state.src
-        tgt_words = tgt
-        # src_batch, src_len = src_words.size()
-        tgt_batch, tgt_len = tgt_words.size()
+        src_words = state.src
+        src_batch, src_len = src_words.size()
+        
+        padding_idx = self.embeddings.padding_idx
 
-        # Run the forward pass of the TransformerDecoder.
-        # emb = self.embeddings(tgt, step=step)
-        emb = self.embeddings(tgt)
+        # Decoder padding mask
+        tgt_words = tgt
+        tgt_batch, tgt_len = tgt_words.size()
+        tgt_pad_mask = tgt_words.data.eq(padding_idx).unsqueeze(1) \
+            .expand(tgt_batch, tgt_len, tgt_len)
+
+        # Encoder padding mask
+        if memory_mask is not None:
+            src_len = memory_masks.size(-1)
+            src_pad_mask = memory_masks.expand(src_batch, tgt_len, src_len)
+        else:
+            src_pad_mask = src_words.data.eq(padding_idx).unsqueeze(1) \
+                .expand(src_batch, tgt_len, src_len)
+
+        # Pass through the embeddings
+        emb = self.embeddings(input_ids)
+        output = self.pos_emb(emb, step)
         assert emb.dim() == 3  # len x batch x embedding_dim
 
-        output = self.pos_emb(emb, step)
-
-        src_memory_bank = memory_bank
-
-        if attention_mask is None:
-            padding_idx = self.embeddings.padding_idx
-            tgt_pad_mask = tgt_words.data.eq(padding_idx).unsqueeze(1) \
-                .expand(tgt_batch, tgt_len, tgt_len)
-
-        # if memory_masks is not None:
-            # src_len = memory_masks.size(-1)
-            # src_pad_mask = memory_masks.expand(src_batch, tgt_len, src_len)
-
-        # else:
-            # src_pad_mask = src_words.data.eq(padding_idx).unsqueeze(1) \
-            # .expand(src_batch, tgt_len, src_len)
-
-        # if state.cache is None:
-            # saved_inputs = []
+        if state.cache is None:
+            saved_inputs = []
 
         for i in range(self.num_layers):
             prev_layer_input = None
-            # if state.cache is None:
-            # if state.previous_input is not None:
-            # prev_layer_input = state.previous_layer_inputs[i]
+            if state.cache is None:
+                if state.previous_input is not None:
+                    prev_layer_input = state.previous_layer_inputs[i]
+
             output, all_input = self.transformer_layers[i](
                 output,
-                src_memory_bank,
+                memory_bank,
                 src_pad_mask,
                 tgt_pad_mask,
                 previous_input=prev_layer_input,
-                layer_cache=None,
-                # layer_cache=state.cache["layer_{}".format(i)] if state.cache is not None else None,
+                layer_cache=state.cache["layer_{}".format(i)] if state.cache is not None else None,
                 step=step
             )
-            # if state.cache is None:
-            # saved_inputs.append(all_input)
+            if state.cache is None:
+                saved_inputs.append(all_input)
 
-        # if state.cache is None:
-            # saved_inputs = torch.stack(saved_inputs)
+        if state.cache is None:
+            saved_inputs = torch.stack(saved_inputs)
 
         output = self.layer_norm(output)
 
         # Process the result and update the attentions.
 
-        # if state.cache is None:
-        # state = state.update_state(tgt, saved_inputs)
+        if state.cache is None:
+            state = state.update_state(tgt, saved_inputs)
 
-        return output  # , state
+        # Decoders in Transformers return a tuple. Beam search will fail
+        # if we don't follow this convention.
+        return (output,)  # , state
 
     def init_decoder_state(self, src, memory_bank,
                            with_cache=False):
@@ -358,8 +358,7 @@ class TransformerDecoderLayer(nn.Module):
             * all_input `[batch_size x current_step x model_dim]`
 
         """
-        dec_mask = torch.gt(tgt_pad_mask + self.mask[:, :tgt_pad_mask.size(1),
-                                      :tgt_pad_mask.size(1)], 0)
+        dec_mask = torch.gt(tgt_pad_mask + self.mask[:, :tgt_pad_mask.size(1), :tgt_pad_mask.size(1)], 0)
         input_norm = self.layer_norm_1(inputs)
         all_input = input_norm
         if previous_input is not None:
@@ -491,8 +490,6 @@ class MultiHeadedAttention(nn.Module):
            * output context vectors `[batch, query_len, dim]`
            * one of the attention vectors `[batch, query_len, key_len]`
         """
-        print("key:", query.size(), key.size(), value.size())
-
         batch_size = key.size(0)
         dim_per_head = self.dim_per_head
         head_count = self.head_count
@@ -565,9 +562,9 @@ class MultiHeadedAttention(nn.Module):
         query = query / math.sqrt(dim_per_head)
         scores = torch.matmul(query, key.transpose(2, 3))
 
-        # if mask is not None:
-            # mask = mask.unsqueeze(1).expand_as(scores)
-            # scores = scores.masked_fill(mask, -1e18)
+        if mask is not None:
+            mask = mask.unsqueeze(1).expand_as(scores)
+            scores = scores.masked_fill(mask, -1e18)
 
         # 3) Apply attention dropout and compute context vectors.
 
@@ -621,6 +618,7 @@ class DecoderState(object):
 
     def map_batch_fn(self, fn):
         raise NotImplementedError()
+
 
 class TransformerDecoderState(DecoderState):
     """ Transformer Decoder state base class """

@@ -17,13 +17,13 @@
 import argparse
 from collections import namedtuple
 import logging
-
+import pdb
 import torch
 
 from models.model_builder import AbsSummarizer  # The authors' implementation
 from model_bertabs import BertAbsSummarizer
 
-from transformers import BertTokenizer, BertConfig, Model2Model
+from transformers import BertTokenizer
 
 
 logging.basicConfig(level=logging.INFO)
@@ -69,14 +69,58 @@ def convert_bertabs_checkpoints(path_to_checkpoints, dump_path):
     original.eval()
 
     new_model = BertAbsSummarizer(config, torch.device("cpu"))
+    new_model.eval()
 
+    # -------------------
     # Convert the weights
+    # -------------------
+
+    logging.info("convert the model")
     new_model.encoder.load_state_dict(original.bert.state_dict())
     new_model.decoder.load_state_dict(original.decoder.state_dict())
     new_model.generator.load_state_dict(original.generator.state_dict())
 
+    # ----------------------------------
+    # Make sure the outpus are identical
+    # ----------------------------------
+
+    logging.info("Make sure that the models' outputs are identical")
+    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+
+    # prepare the model inputs
+    encoder_input_ids = tokenizer.encode("This is sample éàalj'-.")
+    encoder_input_ids.extend([tokenizer.pad_token_id] * (512 - len(encoder_input_ids)))
+    encoder_input_ids = torch.tensor(encoder_input_ids).unsqueeze(0)
+    decoder_input_ids = tokenizer.encode("This is sample 3 éàalj'-.")
+    decoder_input_ids.extend([tokenizer.pad_token_id] * (512 - len(decoder_input_ids)))
+    decoder_input_ids = torch.tensor(decoder_input_ids).unsqueeze(0)
+
+    # forward pass
+    src = encoder_input_ids
+    tgt = decoder_input_ids
+    segs = token_type_ids = None
+    clss = None
+    mask_src = encoder_attention_mask = None
+    mask_tgt = decoder_attention_mask = None
+    mask_cls = None
+
+    output_original_model = original(src, tgt, segs, clss, mask_src, mask_tgt, mask_cls)[0]
+    output_converted_model = new_model(encoder_input_ids, decoder_input_ids, token_type_ids, encoder_attention_mask, decoder_attention_mask)[0]
+
+    pdb.set_trace()
+
+    maximum_absolute_difference = torch.max(torch.abs(output_converted_model - output_original_model)).item()
+    print("Maximum absolute difference beween weights: {:.2f}".format(maximum_absolute_difference))
+
+    are_identical = torch.allclose(output_converted_model, output_original_model, atol=1e-3)
+    if are_identical:
+        logging.info("all weights are equal up to 1e-3")
+    else:
+        raise ValueError("the weights are different. The new model is likely different from the original one.")
+
     # The model has been saved with torch.save(model) and this is bound to the exact
     # directory structure. We save the state_dict instead.
+    logging.info("saving the model's state dictionary")
     torch.save(new_model.state_dict(), "bert-ext-abs.pt")
 
 
