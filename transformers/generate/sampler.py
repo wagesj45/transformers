@@ -21,7 +21,16 @@ def new_sampler(
         temperature=temperature, k=k, p=p, repetition_penalty=repetition_penalty
     )
 
-    return SamplerSingleStack(model, sampler_config, device)
+    has_encoder = callable(getattr(model, "encode", None))
+    has_decoder = callable(getattr(model, "decode", None))
+    if has_encoder and has_decoder:
+        return SamplerEncoderDecoder(model, sampler_config, device)
+    elif has_decoder:
+        return SamplerSingleStack(model, sampler_config, device)
+    else:
+        raise ValueError(
+            "you need to pass a model that at least defines a `decode` method to use the sampler"
+        )
 
 
 class Sampler(object):
@@ -159,11 +168,39 @@ class SamplerSingleStack(Sampler):
         super(SamplerSingleStack, self).__init__(config, device)
 
     def generate_sequence(self, length=1, prompt_ids=[], **model_kwargs):
-        prompt_ids = torch.tensor(prompt_ids, dtype=torch.long, device=self.device).unsqueeze(0)
+        prompt_ids = torch.tensor(
+            prompt_ids, dtype=torch.long, device=self.device
+        ).unsqueeze(0)
         generated_sequence = prompt_ids
         with torch.no_grad():
             for _ in trange(length):
                 outputs = self.model.decode(generated_sequence, **model_kwargs)
+                next_tokens_logits = outputs[0][:, -1, :]
+                next_tokens = self.generate_one_token(
+                    next_tokens_logits, generated_sequence
+                )
+                generated_sequence = torch.cat((generated_sequence, next_tokens), dim=1)
+
+        return generated_sequence.squeeze(0).tolist()
+
+
+class SamplerEncoderDecoder(Sampler):
+    """ Generic sampler for encoder-decoder models.
+    """
+
+    def __init__(self, model, config, device):
+        self.model = model
+        super(SamplerEncoderDecoder, self).__init__(config, device)
+
+    def generate_sequence(self, encoder_input_ids, length=1, prompt_ids=[], **model_kwargs):
+        encoder_kwargs, decoder_kwargs = self.model.prepare_model_kwargs(**model_kwargs)
+        encoder_hidden_states = self.model.encode(encoder_input_ids, **encoder_kwargs)
+
+        prompt = torch.tensor(prompt_ids, dtype=torch.long, device=self.device).unsqueeze(0)
+        generated_sequence = prompt
+        with torch.no_grad():
+            for _ in trange(length):
+                outputs = self.model.decode(generated_sequence, encoder_hidden_states=encoder_hidden_states, **decoder_kwargs)
                 next_tokens_logits = outputs[0][:, -1, :]
                 next_tokens = self.generate_one_token(
                     next_tokens_logits, generated_sequence

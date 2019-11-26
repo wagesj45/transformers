@@ -23,6 +23,7 @@ if is_torch_available():
         SamplerConfig,
         Sampler,
         SamplerSingleStack,
+        SamplerEncoderDecoder,
     )
 else:
     pytestmark = pytest.mark.skip("Require Torch")
@@ -30,6 +31,20 @@ else:
 
 class SamplerFactoryTest(unittest.TestCase):
     ModelStub = namedtuple("ModelStub", [])
+
+    class SingleStackStub(object):
+        def __init__(self):
+            pass
+        def decode(self):
+            pass
+
+    class EncoderDecoderStub(object):
+        def __init__(self):
+            pass
+        def decode(self):
+            pass
+        def encode(self):
+            pass
 
     def test_creation_of_xlm_sampler(self):
         model_config = XLMConfig()
@@ -43,10 +58,20 @@ class SamplerFactoryTest(unittest.TestCase):
         sampler = generate.new_sampler(model)
         self.assertIsInstance(sampler, SamplerSingleStack)
 
-    def test_creation_of_single_stack_model(self):
+    def test_failure_random_model(self):
         model = self.ModelStub()
+        with self.assertRaises(ValueError):
+            generate.new_sampler(model)
+
+    def test_creation_singlestack_model(self):
+        model = self.SingleStackStub()
         sampler = generate.new_sampler(model)
         self.assertIsInstance(sampler, SamplerSingleStack)
+
+    def test_creation_encoderdecoder_model(self):
+        model = self.EncoderDecoderStub()
+        sampler = generate.new_sampler(model)
+        self.assertIsInstance(sampler, SamplerEncoderDecoder)
 
 
 class SamplerTest(unittest.TestCase):
