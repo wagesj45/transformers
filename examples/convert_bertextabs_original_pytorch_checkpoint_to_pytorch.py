@@ -77,8 +77,12 @@ def convert_bertabs_checkpoints(path_to_checkpoints, dump_path):
 
     logging.info("convert the model")
     new_model.encoder.load_state_dict(original.bert.state_dict())
-    new_model.decoder.load_state_dict(original.decoder.state_dict())
-    new_model.generator.load_state_dict(original.generator.state_dict())
+
+    new_model.decoder.generator.load_state_dict(original.generator.state_dict())
+    new_model.decoder.embeddings.load_state_dict(original.decoder.embeddings.state_dict())
+    new_model.decoder.pos_emb.load_state_dict(original.decoder.pos_emb.state_dict())
+    new_model.decoder.transformer_layers.load_state_dict(original.decoder.transformer_layers.state_dict())
+    new_model.decoder.layer_norm.load_state_dict(original.decoder.layer_norm.state_dict())
 
     # ----------------------------------
     # Make sure the outpus are identical
@@ -95,6 +99,10 @@ def convert_bertabs_checkpoints(path_to_checkpoints, dump_path):
     decoder_input_ids.extend([tokenizer.pad_token_id] * (512 - len(decoder_input_ids)))
     decoder_input_ids = torch.tensor(decoder_input_ids).unsqueeze(0)
 
+    # failsafe to make sure the weights reset does not affect the
+    # loaded weights.
+    assert torch.max(torch.abs(original.generator[0].weight - new_model.decoder.generator[0].weight)) == 0
+
     # forward pass
     src = encoder_input_ids
     tgt = decoder_input_ids
@@ -103,11 +111,16 @@ def convert_bertabs_checkpoints(path_to_checkpoints, dump_path):
     mask_src = encoder_attention_mask = None
     mask_tgt = decoder_attention_mask = None
     mask_cls = None
-
+    
+    # The original model does not apply the geneator layer immediatly but rather in
+    # the beam search (where it combines softmax + linear layer). Since we already
+    # apply the softmax in our generation process we only apply the linear layer here.
+    # We make sure that the outputs of the full stack are identical
     output_original_model = original(src, tgt, segs, clss, mask_src, mask_tgt, mask_cls)[0]
-    output_converted_model = new_model(encoder_input_ids, decoder_input_ids, token_type_ids, encoder_attention_mask, decoder_attention_mask)[0]
+    output_original_model = original.generator(output_original_model)
 
-    pdb.set_trace()
+    output_converted_model = new_model(encoder_input_ids, decoder_input_ids, token_type_ids, encoder_attention_mask, decoder_attention_mask)[0]
+    output_converted_model = torch.nn.functional.log_softmax(output_converted_model, dim=-1)
 
     maximum_absolute_difference = torch.max(torch.abs(output_converted_model - output_original_model)).item()
     print("Maximum absolute difference beween weights: {:.2f}".format(maximum_absolute_difference))

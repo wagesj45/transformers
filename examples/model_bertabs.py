@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn.init import xavier_uniform_
-import pdb
 from transformers import BertModel, BertConfig, PreTrainedEncoderDecoder
 
 
@@ -64,12 +63,13 @@ class BertAbsSummarizer(nn.Module):
                                      attention_probs_dropout_prob=args.enc_dropout)
             self.encoder.model = BertModel(bert_config)
 
+        self.vocab_size = self.encoder.model.config.vocab_size
+
         if(args.max_pos > 512):
             my_pos_embeddings = nn.Embedding(args.max_pos, self.encoder.model.config.hidden_size)
             my_pos_embeddings.weight.data[:512] = self.encoder.model.embeddings.position_embeddings.weight.data
             my_pos_embeddings.weight.data[512:] = self.encoder.model.embeddings.position_embeddings.weight.data[-1][None, :].repeat(args.max_pos - 512, 1)
             self.encoder.model.embeddings.position_embeddings = my_pos_embeddings
-        self.vocab_size = self.encoder.model.config.vocab_size
         tgt_embeddings = nn.Embedding(self.vocab_size, self.encoder.model.config.hidden_size, padding_idx=0)
         if (self.args.share_emb):
             tgt_embeddings.weight = copy.deepcopy(self.encoder.model.embeddings.word_embeddings.weight)
@@ -80,18 +80,14 @@ class BertAbsSummarizer(nn.Module):
             heads=self.args.dec_heads,
             d_ff=self.args.dec_ff_size,
             dropout=self.args.dec_dropout,
-            embeddings=tgt_embeddings
+            embeddings=tgt_embeddings,
+            vocab_size=self.vocab_size,
+            device=device,
         )
-
-        self.generator = get_generator(self.vocab_size, self.args.dec_hidden_size, device)
-        self.generator[0].weight = self.decoder.embeddings.weight
 
         load_from_checkpoints = False if checkpoint is None else True
         if load_from_checkpoints:
-            self.load_state_dict(checkpoint, strict=True)
-        else:
-            self.init_weights()
-            self.maybe_tie_embeddings(args)
+            self.load_state_dict(checkpoint)
 
         self.to(device)
 
@@ -115,7 +111,6 @@ class BertAbsSummarizer(nn.Module):
             tgt_embeddings = nn.Embedding(self.vocab_size, self.encoder.model.config.hidden_size, padding_idx=0)
             tgt_embeddings.weight = copy.deepcopy(self.encoder.model.embeddings.word_embeddings.weight)
             self.decoder.embeddings = tgt_embeddings
-            self.generator[0].weight = self.decoder.embeddings.weight
 
     @classmethod
     def from_pretrained(cls, checkpoints, config, device):
@@ -183,14 +178,17 @@ class TransformerDecoder(nn.Module):
        attn_type (str): if using a seperate copy attention
     """
 
-    def __init__(self, num_layers, d_model, heads, d_ff, dropout, embeddings):
+    def __init__(self, num_layers, d_model, heads, d_ff, dropout, embeddings, vocab_size, device):
         super(TransformerDecoder, self).__init__()
-
+        
         # Basic attributes.
         self.decoder_type = 'transformer'
         self.num_layers = num_layers
         self.embeddings = embeddings
         self.pos_emb = PositionalEncoding(dropout, self.embeddings.embedding_dim)
+
+        self.generator = get_generator(vocab_size, d_model, device)
+        # self.generator[0].weight = self.embeddings.weight
 
         # Build TransformerDecoder.
         self.transformer_layers = nn.ModuleList(
@@ -264,12 +262,16 @@ class TransformerDecoder(nn.Module):
 
         output = self.layer_norm(output)
 
-        # Process the result and update the attentions.
-
         if state.cache is None:
             state = state.update_state(tgt, saved_inputs)
 
-        # Decoders in Transformers return a tuple. Beam search will fail
+        # The authors use "generator" in their beam search directly.
+        # To conform with their API we apply the generator here,
+        # although it would make more sense to define a
+        # BertAbsWithGenerator class that subclasses this one.
+        output = self.generator(output)
+
+        # Decoders in transformers return a tuple. Beam search will fail
         # if we don't follow this convention.
         return (output,), state  # , state
 
