@@ -223,7 +223,8 @@ class SamplerEncoderDecoder(Sampler):
 
     def generate_sequence(self, encoder_input_ids, length=1, prompt_ids=[], **model_kwargs):
         encoder_kwargs, decoder_kwargs = self.model.prepare_model_kwargs(**model_kwargs)
-        encoder_hidden_states = self.model.encode(encoder_input_ids, **encoder_kwargs)
+        encoder_outputs = self.model.encode(encoder_input_ids, **encoder_kwargs)
+        encoder_hidden_states = encoder_outputs[0]
 
         prompt = torch.tensor(prompt_ids, dtype=torch.long, device=self.device).unsqueeze(0)
         generated_sequence = prompt
