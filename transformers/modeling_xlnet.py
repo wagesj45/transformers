@@ -983,7 +983,7 @@ class XLNetLMHeadModel(XLNetPreTrainedModel):
 
     @staticmethod
     def _add_dummy_token(sequence):
-        dummy = torch.zeros((sequence.shape[0], 1), dtype=torch.long)
+        dummy = torch.zeros((sequence.size(0), 1), dtype=torch.long)
         return torch.cat((sequence, dummy), dim=1)
 
     @staticmethod

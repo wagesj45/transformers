@@ -204,10 +204,7 @@ class SamplerSingleStack(Sampler):
                 )
             )
 
-    def generate_sequence(self, length=1, prompt_ids=[], **model_kwargs):
-        prompt_ids = torch.tensor(
-            prompt_ids, dtype=torch.long, device=self.device
-        ).unsqueeze(0)
+    def generate_sequence(self, length=1, prompt_ids=torch.tensor([[]], dtype=torch.long), **model_kwargs):
         generated_sequence = prompt_ids
         with torch.no_grad():
             for _ in trange(length):
@@ -229,7 +226,7 @@ class SamplerEncoderDecoder(Sampler):
         self.model = model
         super(SamplerEncoderDecoder, self).__init__(config, device)
 
-    def generate_sequence(self, encoder_input_ids, length=1, prompt_ids=[], **model_kwargs):
+    def generate_sequence(self, encoder_input_ids, length=1, prompt_ids=torch.tensor([[]], dtype=torch.long), **model_kwargs):
         encoder_kwargs, decoder_kwargs = self.model.prepare_model_kwargs(**model_kwargs)
         encoder_outputs = self.model.encode(encoder_input_ids, **encoder_kwargs)
         encoder_hidden_states = encoder_outputs[0]
