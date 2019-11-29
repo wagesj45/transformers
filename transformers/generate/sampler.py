@@ -78,7 +78,7 @@ class Sampler(object):
         logits = self.apply_temperature(logits)
         logits = self.apply_top_k_filter(logits)
         logits = self.apply_nucleus_filter(logits)
-        return self.sample_one_token(logits)
+        return self.get_one_token(logits)
 
     def apply_repetition_penalty(self, logits, past_sequence):
         """ Apply a penalty to tokens that appear more than once in the
@@ -155,7 +155,7 @@ class Sampler(object):
 
         return logits
 
-    def sample_one_token(self, logits):
+    def get_one_token(self, logits):
         if self.do_apply_temperature:
             return torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
         return torch.argmax(logits, dim=-1).unsqueeze(-1)
