@@ -35,7 +35,7 @@ def new_sampler(
         repetition_penalty=repetition_penalty,
     )
 
-    is_encoder_decoder = isinstance(PreTrainedEncoderDecoder)
+    is_encoder_decoder = isinstance(model, PreTrainedEncoderDecoder)
     has_decoder = callable(getattr(model, "decode", None))
     if is_encoder_decoder:
         return SamplerEncoderDecoder(model, sampler_config, device)
@@ -72,7 +72,9 @@ class Sampler(object):
 
         if self.p > 1:
             warnings.warn(
-                "p is a probability; its value must lie between 0 and 1, got {}. Ignored.".format(
+                """You are trying to apply nucleus filtering with a value of p greater than 1 ({}).
+                However p is a probability and its value must lie between 0 and 1. In effect, no filtering
+                will be applied. If this is not the behavior you expect, change the value of p.""".format(
                     self.p
                 )
             )
@@ -115,17 +117,21 @@ class Sampler(object):
         MIT press, 2016.
         """
         if self.do_sample:
-            try:
-                return logits / self.temperature
-            except ZeroDivisionError:
+            # when dividing a float by 0, torch returns inf which in turns breaks the
+            # multinomial with an error message that is not very helpful. It is better
+            # for the user to break the execution and explain why.
+            if self.temperature == 0:
                 raise ZeroDivisionError(
-                    "if you want to sample, the temperature needs to be different from 0"
+                    """You are trying to sample with a temperature equal to 0.
+                    If you wanted to do greedy sampling, set instead `do_sample` to False.
+                    Otherwise set the temperature to a value different from 0."""
                 )
+            return logits / self.temperature
         return logits
 
     def apply_top_k_filter(self, logits):
         """ Use the probability distribution of the tokens to determine the set
-        to be sampled from.  Specifically we select the set of size k such that
+        to be sampled from. Specifically we select the set of size k such that
         the sum of its items' probabilities is maximum.
 
         .. Fan, Angela, Mike Lewis, and Yann Dauphin. "Hierarchical neural
@@ -138,7 +144,9 @@ class Sampler(object):
             except RuntimeError:
                 vocabulary_size = logits.size(-1)
                 raise RuntimeError(
-                    "the value of k provided ({}) must be smaller than the size of the vocabulary ({})".format(
+                    """You provided a value for k ({}) that is larger than the vocabulary size ({}).
+                    If you wanted to sample from the whole vocabulary at each step, set k to 0.
+                    Otherwise choose a value that is smaller than the vocabulary size.""".format(
                         self.k, vocabulary_size
                     )
                 )
