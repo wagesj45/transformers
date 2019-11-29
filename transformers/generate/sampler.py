@@ -5,6 +5,8 @@ import torch
 import torch.nn.functional as F
 from tqdm import trange
 
+from transformers import PreTrainedEncoderDecoder
+
 SamplerConfig = namedtuple("SamplerConfig", ["temperature", "k", "p", "repetition_penalty"])
 
 
@@ -21,9 +23,9 @@ def new_sampler(
         temperature=temperature, k=k, p=p, repetition_penalty=repetition_penalty
     )
 
-    has_encoder = callable(getattr(model, "encode", None))
+    is_encoder_decoder = isinstance(PreTrainedEncoderDecoder)
     has_decoder = callable(getattr(model, "decode", None))
-    if has_encoder and has_decoder:
+    if is_encoder_decoder:
         return SamplerEncoderDecoder(model, sampler_config, device)
     elif has_decoder:
         return SamplerSingleStack(model, sampler_config, device)
