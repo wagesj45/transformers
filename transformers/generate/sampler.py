@@ -228,11 +228,11 @@ class SamplerEncoderDecoder(Sampler):
 
     def generate_sequence(self, encoder_input_ids, prompt_ids, length=1, **model_kwargs):
         encoder_kwargs, decoder_kwargs = self.model.prepare_model_kwargs(**model_kwargs)
-        encoder_outputs = self.model.encode(encoder_input_ids, **encoder_kwargs)
-        encoder_hidden_states = encoder_outputs[0]
-
-        generated_sequence = prompt_ids
         with torch.no_grad():
+            encoder_outputs = self.model.encode(encoder_input_ids, **encoder_kwargs)
+            encoder_hidden_states = encoder_outputs[0]
+
+            generated_sequence = prompt_ids
             for _ in trange(length):
                 outputs = self.model.decode(
                     generated_sequence,
