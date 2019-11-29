@@ -204,7 +204,7 @@ class PreTrainedEncoderDecoder(nn.Module):
         encoder_outputs = self.encoder(input_ids, **kwargs)
         return encoder_outputs
 
-    def decode(self, input_ids, encoder_hidden_states, **kwargs):
+    def decode(self, input_ids, encoder_hidden_states=None, **kwargs):
         kwargs["encoder_hidden_states"] = encoder_hidden_states
         decoder_outputs = self.decoder(input_ids, **kwargs)
         return decoder_outputs
