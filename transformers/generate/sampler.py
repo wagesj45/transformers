@@ -118,7 +118,9 @@ class Sampler(object):
             try:
                 return logits / self.temperature
             except ZeroDivisionError:
-                raise ZeroDivisionError("if you want to sample, the temperature needs to be different from 0")
+                raise ZeroDivisionError(
+                    "if you want to sample, the temperature needs to be different from 0"
+                )
         return logits
 
     def apply_top_k_filter(self, logits):
@@ -181,8 +183,18 @@ class SamplerSingleStack(Sampler):
     """
 
     def __init__(self, model, config, device):
-        self.model = model
         super(SamplerSingleStack, self).__init__(config, device)
+        self.model = model
+
+        # the followings checks that the model is on the same device as the one
+        # that is specified. It only works for models that fit on one GPU.
+        model_device = next(model.parameters()).device
+        if model_device != device:
+            warnings.warn(
+                "The model is not on the same device as the one you specified. Expected {}, got {}.".format(
+                    device, model_device
+                )
+            )
 
     def generate_sequence(self, length=1, prompt_ids=[], **model_kwargs):
         prompt_ids = torch.tensor(
