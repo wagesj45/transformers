@@ -7,11 +7,19 @@ from tqdm import trange
 
 from transformers import PreTrainedEncoderDecoder
 
-SamplerConfig = namedtuple("SamplerConfig", ["temperature", "k", "p", "repetition_penalty"])
+SamplerConfig = namedtuple(
+    "SamplerConfig", ["do_sample", "temperature", "k", "p", "repetition_penalty"]
+)
 
 
 def new_sampler(
-    model, temperature=1.0, k=0, p=0, repetition_penalty=1.0, device=torch.device("cpu")
+    model,
+    do_sample=True,
+    temperature=1.0,
+    k=0,
+    p=0,
+    repetition_penalty=1.0,
+    device=torch.device("cpu"),
 ):
     """ Factory function that returns the appropriate sampler with regards
     to the model passed as a parameter.
@@ -20,7 +28,11 @@ def new_sampler(
     """
 
     sampler_config = SamplerConfig(
-        temperature=temperature, k=k, p=p, repetition_penalty=repetition_penalty
+        do_sample=do_sample,
+        temperature=temperature,
+        k=k,
+        p=p,
+        repetition_penalty=repetition_penalty,
     )
 
     is_encoder_decoder = isinstance(PreTrainedEncoderDecoder)
@@ -52,10 +64,10 @@ class Sampler(object):
     def __init__(self, config, device):
         self.k = config.k
         self.p = config.p
+        self.do_sample = config.do_sample
         self.temperature = config.temperature
         self.repetition_penalty = config.repetition_penalty
 
-        self.do_apply_temperature = True if config.temperature > 0 else False
         self.do_apply_repetition_penalty = True if config.repetition_penalty > 1 else False
 
         if self.p > 1:
@@ -102,8 +114,11 @@ class Sampler(object):
         .. Goodfellow, Ian, Yoshua Bengio, and Aaron Courville. Deep learning.
         MIT press, 2016.
         """
-        if self.do_apply_temperature:
-            return logits / self.temperature
+        if self.do_sample:
+            try:
+                return logits / self.temperature
+            except ZeroDivisionError:
+                raise ZeroDivisionError("if you want to sample, the temperature needs to be different from 0")
         return logits
 
     def apply_top_k_filter(self, logits):
@@ -156,7 +171,7 @@ class Sampler(object):
         return logits
 
     def get_one_token(self, logits):
-        if self.do_apply_temperature:
+        if self.do_sample:
             return torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
         return torch.argmax(logits, dim=-1).unsqueeze(-1)
 
@@ -202,7 +217,11 @@ class SamplerEncoderDecoder(Sampler):
         generated_sequence = prompt
         with torch.no_grad():
             for _ in trange(length):
-                outputs = self.model.decode(generated_sequence, encoder_hidden_states=encoder_hidden_states, **decoder_kwargs)
+                outputs = self.model.decode(
+                    generated_sequence,
+                    encoder_hidden_states=encoder_hidden_states,
+                    **decoder_kwargs
+                )
                 next_tokens_logits = outputs[0][:, -1, :]
                 next_tokens = self.generate_one_token(
                     next_tokens_logits, generated_sequence
