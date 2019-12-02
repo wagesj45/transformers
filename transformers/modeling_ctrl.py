@@ -499,6 +499,3 @@ class CTRLLMHeadModel(CTRLPreTrainedModel):
             outputs = (loss,) + outputs
 
         return outputs  # (loss), lm_logits, presents, (all hidden_states), (attentions)
-
-    def decode(self, input_ids, **model_kwargs):
-        return self(input_ids, **model_kwargs)

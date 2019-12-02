@@ -23,13 +23,16 @@ import json
 import logging
 import os
 from io import open
+import warnings
 
 import six
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch.nn import functional as F
+from tqdm import trange
 
+from generate import Sampler
 from .configuration_utils import PretrainedConfig
 from .file_utils import cached_path, WEIGHTS_NAME, TF_WEIGHTS_NAME, TF2_WEIGHTS_NAME
 
@@ -87,13 +90,49 @@ class PreTrainedModel(nn.Module):
     def base_model(self):
         return getattr(self, self.base_model_prefix, self)
 
-    def decode(self, input_ids, **model_kwargs):
-        """ Decode the input sequence; preprocess the input before
-        the forward pass if necessary.
+    def decode(self, input_ids, device, length=1, prompt_ids=torch.tensor([[]], dtype=torch.long), do_sample=True, temperature=1., k=0, p=0, repetition_penalty=1, **model_kwargs):
+        """ Generic text generator for single-stack models.
         """
-        raise NotImplementedError("Only models with LM heads can be used as decoders")
-        # decoder_arguments = self._prepare_arguments_for_decoding(input_ids, **model_kwargs)
-        # return self.decoder(**decoder_arguments)
+
+        # when the model does not have a LM head `_get_input_embeddings` will
+        # raise an exception. We use this mechanism to determine whether we
+        # should proceed with decoding or not.
+        try:
+            _ = self._get_input_embeddings()
+        except NotImplementedError:
+            raise AttributeError("You tried do generated sequences with a model that does not have a LM Head.")
+
+        # the followings checks that the model is on the same device as the one
+        # that is specified. It only works for models that fit on one GPU.
+        model_device = next(self.parameters()).device
+        if model_device != device:
+            warnings.warn(
+                "The model is not on the same device as the one you specified. Expected {}, got {}.".format(
+                    device, model_device
+                )
+            )
+
+        sampler_config = {
+            "k": k,
+            "p": p,
+            "do_sample": do_sample,
+            "temperature": temperature,
+            "repetition_penalty": repetition_penalty,
+        }
+        sampler = Sampler(device, **sampler_config)
+
+        generated_sequence = prompt_ids
+        with torch.no_grad():
+            for _ in trange(length):
+                arguments = self._prepare_input_for_decoding(input_ids, **model_kwargs)
+                outputs = self(arguments)
+                next_tokens_logits = outputs[0][:, -1, :]
+                next_tokens = sampler.get_one_token(
+                    next_tokens_logits, generated_sequence
+                )
+                generated_sequence = torch.cat((generated_sequence, next_tokens), dim=1)
+
+        return generated_sequence.squeeze(0)
 
     def _prepare_input_for_decoding(self, input_ids, **kwargs):
         arguments = {"input_ids": input_ids}

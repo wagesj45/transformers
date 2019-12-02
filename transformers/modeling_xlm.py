@@ -657,10 +657,6 @@ class XLMWithLMHeadModel(XLMPreTrainedModel):
 
         return outputs
 
-    def decode(self, input_ids, **model_kwargs):
-        model_inputs = self._prepare_inputs_for_decoding(input_ids, **model_kwargs)
-        return self(**model_inputs)
-
     def _prepare_inputs_for_decoding(self, input_ids, **model_kwargs):
         mask_token = model_kwargs.pop("mask_token", None)
         language = model_kwargs.pop("language", None)

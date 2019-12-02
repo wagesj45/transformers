@@ -966,10 +966,6 @@ class XLNetLMHeadModel(XLNetPreTrainedModel):
 
         return outputs  # return (loss), logits, (mems), (hidden states), (attentions)
 
-    def decode(self, input_ids, **model_kwargs):
-        model_inputs = self._prepare_inputs_for_decoding(input_ids, **model_kwargs)
-        return self(**model_inputs)
-
     def _prepare_inputs_for_decoding(self, input_ids, **model_kwargs):
         input_ids = self._add_dummy_token(input_ids)
         perm_mask = self._create_perm_mask(input_ids)

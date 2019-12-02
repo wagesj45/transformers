@@ -908,6 +908,3 @@ class TransfoXLLMHeadModel(TransfoXLPreTrainedModel):
                 outputs = [softmax_output, None] + outputs
 
         return outputs  # (loss), logits or None if labels is not None (speed up adaptive softmax), new_mems, (all hidden states), (all attentions)
-
-    def decode(self, input_ids, **model_kwargs):
-        return self(input_ids, **model_kwargs)

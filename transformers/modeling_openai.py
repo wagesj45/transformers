@@ -528,9 +528,6 @@ class OpenAIGPTLMHeadModel(OpenAIGPTPreTrainedModel):
 
         return outputs  # (loss), lm_logits, (all hidden states), (all attentions)
 
-    def decode(self, input_ids, **model_kwargs):
-        return self(input_ids, **model_kwargs)
-
 
 @add_start_docstrings("""OpenAI GPT Model transformer with a language modeling and a multiple-choice classification
 head on top e.g. for RocStories/SWAG tasks. The two heads are two linear layers.

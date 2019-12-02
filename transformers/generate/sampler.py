@@ -1,50 +1,8 @@
-from collections import namedtuple
 import warnings
 
 import torch
 import torch.nn.functional as F
 from tqdm import trange
-
-from transformers import PreTrainedEncoderDecoder
-
-SamplerConfig = namedtuple(
-    "SamplerConfig", ["do_sample", "temperature", "k", "p", "repetition_penalty"]
-)
-
-
-def new_sampler(
-    model,
-    do_sample=True,
-    temperature=1.0,
-    k=0,
-    p=0,
-    repetition_penalty=1.0,
-    device=torch.device("cpu"),
-):
-    """ Factory function that returns the appropriate sampler with regards
-    to the model passed as a parameter.
-
-    Only single stacks are currently supported.
-    """
-
-    sampler_config = SamplerConfig(
-        do_sample=do_sample,
-        temperature=temperature,
-        k=k,
-        p=p,
-        repetition_penalty=repetition_penalty,
-    )
-
-    is_encoder_decoder = isinstance(model, PreTrainedEncoderDecoder)
-    has_decoder = callable(getattr(model, "decode", None))
-    if is_encoder_decoder:
-        return SamplerEncoderDecoder(model, sampler_config, device)
-    elif has_decoder:
-        return SamplerSingleStack(model, sampler_config, device)
-    else:
-        raise ValueError(
-            "you need to pass a model that at least defines a `decode` method to use the sampler"
-        )
 
 
 class Sampler(object):
@@ -61,14 +19,14 @@ class Sampler(object):
             Device on which the computations will be run.
     """
 
-    def __init__(self, config, device):
-        self.k = config.k
-        self.p = config.p
-        self.do_sample = config.do_sample
-        self.temperature = config.temperature
-        self.repetition_penalty = config.repetition_penalty
+    def __init__(self, device, k=0, p=0, do_sample=True, temperature=1., repetition_penalty=1.):
+        self.k = k
+        self.p = p
+        self.do_sample = do_sample
+        self.temperature = temperature
+        self.repetition_penalty = repetition_penalty
 
-        self.do_apply_repetition_penalty = True if config.repetition_penalty > 1 else False
+        self.do_apply_repetition_penalty = True if repetition_penalty > 1 else False
 
         if self.p > 1:
             warnings.warn(
@@ -80,12 +38,6 @@ class Sampler(object):
             )
 
         self.device = device
-
-    def generate_sequence(self):
-        """ Generate a sequence of `length` tokens starting from the
-        provided `prompt`. This method is model-specific.
-        """
-        raise NotImplementedError
 
     def get_one_token(self, next_token_logits, past_sequence):
         logits = self.apply_repetition_penalty(next_token_logits, past_sequence)
@@ -181,38 +133,6 @@ class Sampler(object):
             logits[indices_to_remove] = -float("Inf")
 
         return logits
-
-
-class SamplerSingleStack(Sampler):
-    """ Generic sampler for single-stack models.
-    """
-
-    def __init__(self, model, config, device):
-        super(SamplerSingleStack, self).__init__(config, device)
-        self.model = model
-
-        # the followings checks that the model is on the same device as the one
-        # that is specified. It only works for models that fit on one GPU.
-        model_device = next(model.parameters()).device
-        if model_device != device:
-            warnings.warn(
-                "The model is not on the same device as the one you specified. Expected {}, got {}.".format(
-                    device, model_device
-                )
-            )
-
-    def generate_sequence(self, length=1, prompt_ids=torch.tensor([[]], dtype=torch.long), **model_kwargs):
-        generated_sequence = prompt_ids
-        with torch.no_grad():
-            for _ in trange(length):
-                outputs = self.model.decode(generated_sequence, **model_kwargs)
-                next_tokens_logits = outputs[0][:, -1, :]
-                next_tokens = self.get_one_token(
-                    next_tokens_logits, generated_sequence
-                )
-                generated_sequence = torch.cat((generated_sequence, next_tokens), dim=1)
-
-        return generated_sequence.squeeze(0).tolist()
 
 
 class SamplerEncoderDecoder(Sampler):
