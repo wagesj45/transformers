@@ -87,12 +87,14 @@ class Sampler(object):
         """
         raise NotImplementedError
 
-    def generate_one_token(self, next_token_logits, past_sequence):
+    def get_one_token(self, next_token_logits, past_sequence):
         logits = self.apply_repetition_penalty(next_token_logits, past_sequence)
-        logits = self.apply_temperature(logits)
-        logits = self.apply_top_k_filter(logits)
-        logits = self.apply_nucleus_filter(logits)
-        return self.get_one_token(logits)
+        if self.do_sample:
+            logits = self.apply_temperature(logits)
+            logits = self.apply_top_k_filter(logits)
+            logits = self.apply_nucleus_filter(logits)
+            return torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
+        return torch.argmax(logits, dim=-1).unsqueeze(-1)
 
     def apply_repetition_penalty(self, logits, past_sequence):
         """ Apply a penalty to tokens that appear more than once in the
@@ -116,18 +118,16 @@ class Sampler(object):
         .. Goodfellow, Ian, Yoshua Bengio, and Aaron Courville. Deep learning.
         MIT press, 2016.
         """
-        if self.do_sample:
-            # when dividing a float by 0, torch returns inf which in turns breaks the
-            # multinomial with an error message that is not very helpful. It is better
-            # for the user to break the execution and explain why.
-            if self.temperature == 0:
-                raise ZeroDivisionError(
-                    """You are trying to sample with a temperature equal to 0.
-                    If you wanted to do greedy sampling, set instead `do_sample` to False.
-                    Otherwise set the temperature to a value different from 0."""
-                )
-            return logits / self.temperature
-        return logits
+        # when dividing a float by 0, torch returns inf which in turns breaks the
+        # multinomial with an error message that is not very helpful. It is better
+        # for the user to break the execution and explain why.
+        if self.temperature == 0:
+            raise ZeroDivisionError(
+                """You are trying to sample with a temperature equal to 0.
+                If you wanted to do greedy sampling, set instead `do_sample` to False.
+                Otherwise set the temperature to a value different from 0."""
+            )
+        return logits / self.temperature
 
     def apply_top_k_filter(self, logits):
         """ Use the probability distribution of the tokens to determine the set
@@ -182,11 +182,6 @@ class Sampler(object):
 
         return logits
 
-    def get_one_token(self, logits):
-        if self.do_sample:
-            return torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
-        return torch.argmax(logits, dim=-1).unsqueeze(-1)
-
 
 class SamplerSingleStack(Sampler):
     """ Generic sampler for single-stack models.
@@ -212,7 +207,7 @@ class SamplerSingleStack(Sampler):
             for _ in trange(length):
                 outputs = self.model.decode(generated_sequence, **model_kwargs)
                 next_tokens_logits = outputs[0][:, -1, :]
-                next_tokens = self.generate_one_token(
+                next_tokens = self.get_one_token(
                     next_tokens_logits, generated_sequence
                 )
                 generated_sequence = torch.cat((generated_sequence, next_tokens), dim=1)
@@ -242,7 +237,7 @@ class SamplerEncoderDecoder(Sampler):
                     **decoder_kwargs
                 )
                 next_tokens_logits = outputs[0][:, -1, :]
-                next_tokens = self.generate_one_token(
+                next_tokens = self.get_one_token(
                     next_tokens_logits, generated_sequence
                 )
                 generated_sequence = torch.cat((generated_sequence, next_tokens), dim=1)

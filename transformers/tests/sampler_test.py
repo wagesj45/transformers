@@ -125,7 +125,7 @@ class SamplerTest(unittest.TestCase):
         next_token_logits = torch.rand(case['vocab_size']).unsqueeze(0)
         past_sequence = torch.tensor([])
         with self.assertWarns(UserWarning):
-            _ = sampler.generate_one_token(next_token_logits, past_sequence)
+            _ = sampler.get_one_token(next_token_logits, past_sequence)
 
     def test_zero_temperature(self):
         temperature = 0
@@ -134,7 +134,7 @@ class SamplerTest(unittest.TestCase):
         next_token_logits = torch.rand(10).unsqueeze(0)
         past_sequence = torch.tensor([])
         with self.assertRaises(ZeroDivisionError):
-            _ = sampler.generate_one_token(next_token_logits, past_sequence)
+            _ = sampler.get_one_token(next_token_logits, past_sequence)
 
 
 class SamplerSingleStackTest(unittest.TestCase):
