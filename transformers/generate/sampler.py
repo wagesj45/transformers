@@ -138,18 +138,20 @@ class Sampler(object):
         story generation." arXiv preprint arXiv:1805.04833 (2018).
         """
         if self.k > 0:
-            try:
-                indices_to_remove = logits < torch.topk(logits, self.k)[0][..., -1, None]
-                logits[indices_to_remove] = -float("Inf")
-            except RuntimeError:
-                vocabulary_size = logits.size(-1)
-                raise RuntimeError(
+            vocabulary_size = logits.size(-1)
+            if self.k > vocabulary_size:
+                warnings.warn(
                     """You provided a value for k ({}) that is larger than the vocabulary size ({}).
-                    If you wanted to sample from the whole vocabulary at each step, set k to 0.
-                    Otherwise choose a value that is smaller than the vocabulary size.""".format(
+                    We adjusted k's value to the vocabulary size; if that was what you intended to do
+                    we recommend setting k to 0 instead. It this is not the behavior you expected,
+                    choose a value of k that is smaller than the vocabulary size.""".format(
                         self.k, vocabulary_size
                     )
                 )
+                self.k = vocabulary_size
+
+            indices_to_remove = logits < torch.topk(logits, self.k)[0][..., -1, None]
+            logits[indices_to_remove] = -float("Inf")
 
         return logits
 

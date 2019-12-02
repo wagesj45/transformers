@@ -124,7 +124,7 @@ class SamplerTest(unittest.TestCase):
         sampler = Sampler(config, device=torch.device("cpu"))
         next_token_logits = torch.rand(case['vocab_size']).unsqueeze(0)
         past_sequence = torch.tensor([])
-        with self.assertRaises(RuntimeError):
+        with self.assertWarns(UserWarning):
             _ = sampler.generate_one_token(next_token_logits, past_sequence)
 
     def test_zero_temperature(self):
